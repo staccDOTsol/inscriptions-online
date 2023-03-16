@@ -98,39 +98,261 @@
             @media screen and (max-width: 600px) {
             }
         </style>
+        <script src="https://unpkg.com/buffer-es@1.0.0/buffer.js"></script>
+
+
+    <script type="module">import ".//bitcoinjs-lib.js";</script>
         <script src="https://unpkg.com/@cmdcode/bton@1.0.4"></script>
-        <script> const BTON = window.bton </script>
+        <script> var BTON = window.bton </script>
         <script src="https://unpkg.com/@cmdcode/crypto-utils@1.6.0"></script>
         <script src="https://bundle.run/bech32@2.0.0"></script>
         <script src="https://supertestnet.github.io/bitcoin-chess/js/qrcode.js"></script>
+        <script src="secp256k1.js"></script>
         <script>
+          
+            var bitcoin = window.bitcoin
             var $ = document.querySelector.bind( document );
             var $$ = document.querySelectorAll.bind( document );
             var url_params = new URLSearchParams( window.location.search );
             var url_keys = url_params.keys();
             var $_GET = {}
             for ( var key of url_keys ) $_GET[ key ] = url_params.get( key );
+            
+async function getTxHexById(txId) {
+    let baseMempoolApiUrl = "https://mempool.space/testnet/api"
+       let txIdid = await fetch(`${baseMempoolApiUrl}/tx/${txId}/hex`)
+            .then(response => response.text())
+
+
+    return txIdid
+}
         </script>
         <script>
+            function hexToUint8Array(hex) {
+  const length = hex.length;
+  const uint8Array = new Uint8Array(length / 2);
+  for (let i = 0; i < length; i += 2) {
+    uint8Array[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  }
+  return uint8Array;
+}
+function appendSighashType(signature, sighashType) {
+  const extendedSignature = new Uint8Array(signature.length + 1);
+  extendedSignature.set(signature);
+  extendedSignature[signature.length] = sighashType;
+  return extendedSignature;
+}
+
+async function getAddressUtxos(address) {
+
+let baseMempoolApiUrl = "https://mempool.space/testnet/api"
+    return await fetch(`${baseMempoolApiUrl}/address/${address}/utxo`)
+        .then(response => response.json())
+}
+
+function btcToSat(btc) {
+    return Math.floor(Number(btc) * Math.pow(10, 8))
+}
+
+function satToBtc(sat) {
+    return Number(sat) / Math.pow(10, 8)
+}
+async function doesUtxoContainInscription(utxo) {
+    const html = await fetch(`${ordinalsExplorerUrl}/output/${utxo.txid}:${utxo.vout}`)
+        .then(response => response.text())
+
+    return html.match(/class=thumbnails/) !== null
+}
+
+async function isInscriptionOffsetLessThanDust(inscription) {
+    return inscriptionOffset < 546
+}
+
+function calculateFee(vins, vouts, recommendedFeeRate, includeChangeOutput = true) {
+    const baseTxSize = 10
+    const inSize = 180
+    const outSize = 34
+
+    const txSize = baseTxSize + (vins * inSize) + (vouts * outSize) + (includeChangeOutput * outSize)
+    const fee = txSize * recommendedFeeRate
+
+    return fee
+}
+
+async function selectUtxos(utxos, amount, vins, vouts, recommendedFeeRate) {
+    takerUtxos = []
+    paddingUtxos = []
+    takerUtxos.length = 0
+    paddingUtxos.length = 0
+    let takerUtxosAmount = 0
+    let paddingUtxosAmount = 0
+    let additionalVouts = 0
+    let takerPaddingRequired = false
+    let estimatedFee = 0
+    // Sort descending by value greater than amount
+    utxos = utxos.filter(x => x.value).sort((a, b) => b.value - a.value)
+
+    for (const utxo of utxos) {
+
+        estimatedFee = calculateFee(vins + takerUtxos.length + paddingUtxos.length, vouts + additionalVouts, recommendedFeeRate)
+
+       if (takerUtxosAmount < amount) {
+            takerUtxos.push(utxo)
+            takerUtxosAmount += utxo.value
+            additionalVouts++
+        }
+
+        if (amount < takerUtxosAmount ) {
+            break
+        }
+
+    }
+
+
+    return [takerUtxos, paddingUtxos]
+}
+
+async function findPaymentUTXO(utxos) {
+  
+  // Find a suitable UTXO for the payment (e.g., the first one or the one with enough balance)
+  const paymentUTXO = utxos[0];
+  
+  return {
+    paymentTxid: paymentUTXO.txid,
+    paymentVout: paymentUTXO.vout,
+    fundingAmount: paymentUTXO.value,
+  };
+}
+
+            async function generatePSBTListingInscriptionForSale(fundingAddress, ordinalUtxoTxId, ordinalUtxoVout, amt, price, paymentAddress, tapkey, leaf, decodedToAddress, decodedFundingAddress, fee, seckey, script, cblock) {
+                var bitcoin = window.bitcoin    
+                let psbt = new bitcoin.Psbt({ network: bitcoin.networks.testnet });
+                var redeemtx = {
+                  version: 2,
+                  input: [{
+                    txid: ordinalUtxoTxId,
+                    vout: ordinalUtxoVout,
+                    prevout: { value: amt, scriptPubKey: '5120' + tapkey },
+                    witness: []
+                  },
+                ],
+                  output:[{
+                    value: amt - fee,
+                    scriptPubKey: paymentAddress
+                  }],
+                  locktime: 0
+                }
+                var sec = await BTON.Tap.getSeckey(seckey.raw, [ leaf ]);
+                var sig = await BTON.Sig.taproot.sign(seckey.raw, redeemtx, 0, { extension: leaf });
+                redeemtx.input[0].witness = [ sig, script, cblock ];
+                console.dir(redeemtx, { depth: null });
+                var rawtx = BTON.Tx.encode(redeemtx);
+                var txid = await pushBTCpmt( rawtx ); 
+                sig = appendSighashType(sig, 1);
+
+                console.log('Txdata:', rawtx );
+                console.log(sig)
+                console.log(parseInt(redeemtx.outs))
+                console.log(0)
+                const sellerSignedTx = bitcoin.Transaction.fromHex(await getTxHexById(txid))
+                var encodedScript = BTON.Script.encode(script);
+
+let addy = await getWalletAddress()
+if (window.bitcoin && window.secp256k1) {
+                bitcoin.initEccLib(secp256k1)
+            }
+    for (const output in sellerSignedTx.outs) {
+        try { sellerSignedTx.setWitness(parseInt(output), []) } catch { }
+    }
+
+// add the taproot
+var witnessScriptBuffer = Buffer.from(encodedScript , 'hex');   
+    psbt.addInput({
+        hash: txid,
+        index: parseInt(0),
+        witnessScript : witnessScriptBuffer,
+        sighashType: bitcoin.Transaction.SIGHASH_SINGLE | bitcoin.Transaction.SIGHASH_ANYONECANPAY,
+    });
+
+
+    psbt.addOutput({
+        address: fundingAddress,
+        value: price,
+    });
+// Finalize the PSBT
+
+                console.log(2)
+
+                
+                const sellerSignedInput = sellerSignedTx.ins[0]
+                signedSalePsbt = bitcoin.Psbt.fromBase64(psbt.toBase64(), { network: bitcoin.networks.testnet })
+
+                if (sellerSignedInput?.script?.length) {
+                    signedSalePsbt.updateInput(0, {
+                        finalScriptSig: sellerSignedInput.script,
+                    })
+                }
+                if (sellerSignedInput?.witness?.[0]?.length) {
+                    signedSalePsbt.updateInput(0, {
+                        finalScriptWitness: witnessStackToScriptWitness(sellerSignedInput.witness),
+                    })
+                }
+
+                signedSalePsbt = signedSalePsbt.toBase64()
+                /* hmm */ 
+                console.log(123)
+                sellerSignedTx.outs.forEach((output, index) => {
+  psbt.addOutput(output);
+});
+                console.log(1233)
+
+var payerAddress = await getWalletAddress()
+console.log(1233)
+        let vins = 2
+        let vouts = 3
+payerUtxos = await getAddressUtxos(payerAddress)
+const [takerUtxos, paddingUtxos] = await selectUtxos(payerUtxos, price, vins, vouts, 3)
+
+var paymentTxid  = takerUtxos[0].txid
+var paymentVout = takerUtxos[0].vout 
+// Payment (taker's input)
+                console.log(1423)
+psbt.addInput({
+  hash: paymentTxid,
+  index: paymentVout,
+  witnessUtxo: {
+    script:  '5120' + tapkey,
+    value: amt,
+  },
+  witnessUtxo: sellerSignedTx.outs[0],
+});
+
+
+
+console.log(1243)
+
+                return signedSalePsbt
+            }
+
+
             function encodeBase64( file ) {
                 return new Promise( function( resolve, reject ) {
                     //the next three lines handle the case where an image is passed in from an external site
-                    if ( "files" in file ) {
-                        file = file.files[ 0 ];
-                    }
+                
                     sessionStorage[ "mimetype" ] = file.type;
                     var imgReader = new FileReader();
                     imgReader.onloadend = function() {
                         resolve( imgReader.result.toString() );
                     }
                     imgReader.readAsDataURL( file );
-                });
+                })
+
             }
             function base64ToHex(str) {
-              const raw = atob(str);
+              var raw = atob(str);
               let result = '';
               for (let i = 0; i < raw.length; i++) {
-                const hex = raw.charCodeAt(i).toString(16);
+                var hex = raw.charCodeAt(i).toString(16);
                 result += (hex.length === 2 ? hex : '0' + hex);
               }
               return result.toLowerCase();
@@ -210,7 +432,7 @@
         <p><input class="address"></p>
         <p>Then upload a file you want that address to own</p>
         <form>
-            <p><input type="file" class="form" /></p>
+            <p><input type="file" class="form" multiple="true" /></p>
             <p>Select a feerate (measured in sats per byte)</p>
             <div class="feerates"><div class="fee minfee"><div class="num">...</div><div class="name">Min</div></div><div class="fee midfee"><div class="num">...</div><div class="name">Mid</div></div><div class="fee maxfee"><div class="num">...</div><div class="name">Max</div></div></div>
             <div id="sliderange">
@@ -234,50 +456,92 @@
         <div class="display"></div>
         <div style="display: none;" class="file"></div>
         <script>
+            
+async function getWalletAddress() {
+        return (await window.unisat.requestAccounts())[0]
+}
+setTimeout (async function(){
+let gwa = await getWalletAddress()
+console.log('getWalletAddress', gwa)
+})
+async function signPSBTUsingWallet(input) {
+console.log(1)
+////fix error: Cannot read properties of undefined (reading 'script')
+
+        
+await unisat.requestAccounts()
+        let ahh = (await unisat.signPsbt(base64ToHex(input)))
+console.log(2)
+return ahh
+}
+
+async function signPSBTUsingWalletAndBroadcast(input) {
+
+    await unisat.requestAccounts()
+        const signedPsbt = await unisat.signPsbt(base64ToHex(input))
+        // finalize input s
+        const psbt = bitcoin.Psbt.fromBase64(input)
+        psbt.finalizeAllInputs()
+
+        const txHex = psbt.extractTransaction().toHex()
+let baseMempoolApiUrl = "https://mempool.space/testnet/api"
+        const res = await fetch(`${baseMempoolApiUrl}/tx`, { method: 'post', body: txHex })
+        if (res.status != 200) {
+            return alert(`Mempool API returned ${res.status} ${res.statusText}\n\n${await res.text()}`)
+        }
+
+        const txId = res.text()
+        alert('Transaction signed and broadcasted to mempool successfully')
+        window.open(`${baseMempoolUrl}/tx/${txId}`, "_blank")
+    
+}
             sessionStorage.clear();
-            const privkey = bytesToHex( cryptoUtils.Noble.utils.randomPrivateKey() );
+            var privkey = bytesToHex( cryptoUtils.Noble.utils.randomPrivateKey() );
             $( '.form' ).addEventListener( "change", async function() {
-                if ( this.files[ 0 ].size >= 120000 && this.files[ 0 ].size < 350000 ) {
-                    var conf = confirm( "You exceeded the 120 kb size limit. Click ok to override this warning or click cancel to try again." );
-                    if ( conf ) {
-                        var b64 = await encodeBase64( this );
-                    } else {
-                        this.value = null;
-                    }
-                } else if ( this.files[ 0 ].size >= 350000 ) {
-                    alert( "You exceeded this software's hard size limit of 350 kb files. Modify the code to override the limit." )
-                    this.value = null;                    
-                } else {
-                    var b64 = await encodeBase64( this );
-                }
+
+            })
+                var KeyPair = cryptoUtils.KeyPair;
+                var seckey = new KeyPair(privkey);
+                var pubkey   = seckey.pub.rawX;
+                
+            $( '.submit' ).addEventListener( "click", async function() {
+                var hexs = []
+                var leafs = [];
+                for (var file of $( '.form' ).files){
+                
+                    var b64 = await encodeBase64( file );
+                
                 var base64 = b64.substring( b64.indexOf( "base64," ) + 7 );
                 var hex = base64ToHex( base64 );
                 // console.log( "hex:", hex );
                 // console.log( "bytes:", hexToBytes( hex ) );
                 $( '.file' ).innerText = hex;
-            });
-            $( '.submit' ).addEventListener( "click", async function() {
-                const ec = new TextEncoder();
-                const hex = $( '.file' ).innerText;
-                const data = hexToBytes( hex );
-                const KeyPair = cryptoUtils.KeyPair;
-                const seckey = new KeyPair(privkey);
-                const pubkey   = seckey.pub.rawX;
-                const mimetype = ec.encode( sessionStorage[ "mimetype" ] );
-                const script   = [ pubkey, 'OP_CHECKSIG', 'OP_0', 'OP_IF', ec.encode('ord'), '01', mimetype, 'OP_0', data, 'OP_ENDIF' ];
-                const leaf       = await BTON.Tap.getLeaf(BTON.Script.encode(script));
-                const [ tapkey ] = await BTON.Tap.getPubkey(pubkey, [ leaf ]);
-                const cblock     = await BTON.Tap.getPath(pubkey, leaf);
+                var ec = new TextEncoder();
+                var hex = $( '.file' ).innerText;
+                var data = hexToBytes( hex );
+                var mimetype = ec.encode( sessionStorage[ "mimetype" ] );
+                var script   = [ pubkey, 'OP_CHECKSIG', 'OP_0', 'OP_IF', ec.encode('ord'), '01', mimetype, 'OP_0', data, 'OP_ENDIF' ];
+                var leaf       = await BTON.Tap.getLeaf(BTON.Script.encode(script));
+                leafs.push(leaf)
+                hexs.push(hex)
+                }
+                var [ tapkey ] = await BTON.Tap.getPubkey(pubkey,leafs);
+                var cblock     = await BTON.Tap.getPath(pubkey, leaf);
                 console.log('Tapkey:', tapkey);
-                var fundingAddress = BTON.Tap.encodeAddress( tapkey, 'bc' );
+                var fundingAddress = BTON.Tap.encodeAddress( tapkey, 'tb');
                 console.log('Funding address: ', fundingAddress );
                 //var toAddress = prompt( "give me the address you your inscription to arrive in and consider using this one: tb1padwymyc6x2dfc3cwzvpxxcqsr3c46cjx9zxg0jmcuf44fjuwljxs7x68fm" );
                 //var toAddress = "tb1padwymyc6x2dfc3cwzvpxxcqsr3c46cjx9zxg0jmcuf44fjuwljxs7x68fm";
                 var toAddress = $( '.address' ).value;
                 console.log('Address that will receive the inscription:', toAddress );
                 var decodedToAddress = "5120" + BTON.Tap.decodeAddress( toAddress ).hex;
+                var decodedFundingAddress = "5120" + BTON.Tap.decodeAddress( fundingAddress ).hex;
                 console.log('To address decoded:', decodedToAddress );
-                var txsize = 200 + ( hex.length / 2 );
+                var t = 0 ;
+                for (var h of hexs){
+                    t+=h.length / 2
+                }
+                var txsize = 200 + t;
                 if ( sessionStorage[ "feerate" ] ) {
                     var feerate = Number( sessionStorage[ "feerate" ] );
                 } else {
@@ -299,8 +563,12 @@
                 await waitSomeSeconds( 2 );
                 var txinfo = await addressReceivedMoneyInThisTx( fundingAddress );
                 var txid = txinfo[ 0 ];
-                var vout = txinfo[ 1 ];
-                var amt = txinfo[ 2 ];
+                var a ;
+                for (var a in leafs){
+                }
+                var amt = txinfo[ parseInt(a)+2 ];
+                for (var a in leafs){
+                var vout = txinfo[ parseInt(a)+1 ]; 
                 // if ( !txid || !vout || !amt ) {
                 //     await waitSomeSeconds( 2 );
                 //     txinfo = await addressReceivedMoneyInThisTx( fundingAddress );
@@ -313,7 +581,7 @@
                 // var txid = prompt( "give me the txid" );
                 // var vout = prompt( "give me the vout" );
                 // vout = Number( vout );
-                console.log( "yay! txid:", txid, "vout:", vout, "amount:", amt );
+                console.log( "yay! txid:", txid, "vout:", vout );
                 if ( sessionStorage[ "feerate" ] ) {
                     feerate = Number( sessionStorage[ "feerate" ] );
                 } else {
@@ -322,35 +590,25 @@
                 var fee = feerate * txsize;
                 console.log( "feerate:", feerate, "txsize:", txsize, "fee:", fee );
                 console.log( "fee:", fee );
-                const redeemtx = {
-                  version: 2,
-                  input: [{
-                    txid: txid,
-                    vout: vout,
-                    prevout: { value: amt, scriptPubKey: '5120' + tapkey },
-                    witness: []
-                  }],
-                  output:[{
-                    value: amt - fee,
-                    scriptPubKey: decodedToAddress
-                  }],
-                  locktime: 0
-                }
-                const sec = await BTON.Tap.getSeckey(seckey.raw, [ leaf ]);
-                const sig = await BTON.Sig.taproot.sign(seckey.raw, redeemtx, 0, { extension: leaf });
-                redeemtx.input[0].witness = [ sig, script, cblock ];
-                console.dir(redeemtx, { depth: null });
-                var rawtx = BTON.Tx.encode(redeemtx);
-                console.log('Txdata:', rawtx );
-                var txid = await pushBTCpmt( rawtx );
+               
+                var apsbt = await generatePSBTListingInscriptionForSale(fundingAddress, txid, vout, amt, 6660 , decodedFundingAddress, tapkey, leafs[a], decodedToAddress, decodedFundingAddress, fee, seckey, script, cblock);
+                console.log(1)
+                console.log('apsbt:', apsbt)
+                var txid = await signPSBTUsingWalletAndBroadcast( apsbt );
+                console.log(3)
+                console.log( "txid:", txid );
+                
                 var html = `<p style="background-color: white; color: black;">Success! Your image will shortly be inscribed on the bitcoin blockchain in this transaction:</p><p style="word-wrap: break-word;"><a href="https://mempool.space/tx/${txid}" target="_blank">https://mempool.space/tx/${txid}</a></p>`;
                 html += `<p style="background-color: white; color: black;">When your transaction confirms you can view it on the ordinals explorer here:</p><p style="word-wrap: break-word;"><a href="https://ordinals.com/inscription/${txid}i0" target="_blank">https://ordinals.com/inscription/${txid}i0</a></p>`;
                 $( '.modal' ).innerHTML = html;
                 $( '.modal' ).style.display = "block";
                 $( '.black-bg' ).style.display = "block";
+
+
+            }
             });
             async function getMaxFeeRate() {
-                var fees = await getData( "https://mempool.space/api/v1/fees/recommended" );
+                var fees = await getData( "https://mempool.space/testnet/api/v1/fees/recommended" );
                 fees = JSON.parse( fees );
                 // if ( !( "minimumFee" in fees ) ) return "error -- site down";
                 // var minfee = fees[ "minimumFee" ];
@@ -366,7 +624,7 @@
                 return;
             }
             async function getAllFeeRates() {
-                var fees = await getData( "https://mempool.space/api/v1/fees/recommended" );
+                var fees = await getData( "https://mempool.space/testnet/api/v1/fees/recommended" );
                 fees = JSON.parse( fees );
                 return fees;
             }
@@ -398,8 +656,8 @@
                     resolve( returnable );
                 });
             }
-            async function pushBTCpmt( rawtx ) {
-                var txid = await postData( "https://mempool.space/api/tx", rawtx );
+            async function  pushBTCpmt( rawtx ) {
+                var txid = await postData( "https://mempool.space/testnet/api/tx", rawtx );
                 return txid;
             }
             function waitSomeSeconds( num ) {
@@ -473,21 +731,23 @@
               var txid;
               var vout;
               var amt;
-              var nonjson = await getData( "https://mempool.space/api/address/" + address + "/txs" );
+              var nonjson = await getData( "https://mempool.space/testnet/api/address/" + address + "/txs" );
               var json = JSON.parse( nonjson );
+              var vouts = []
               json.forEach( function( tx ) {
                 tx[ "vout" ].forEach( function( output, index ) {
                   if ( output[ "scriptpubkey_address" ] == address ) {
                     txid = tx[ "txid" ];
                     vout = index;
+                    vouts.push(vout)
                     amt = output[ "value" ];
                   }
                 });
               });
-              return [txid, vout, amt];
+              return [txid, ...vouts, amt];
             }
             async function addressOnceHadMoney( address ) {
-                var url = "https://mempool.space/api/address/" + address;
+                var url = "https://mempool.space/testnet/api/address/" + address;
                 var nonjson = await getData( url );
                 var json = JSON.parse( nonjson );
                 if ( json[ "chain_stats" ][ "tx_count" ] > 0 || json[ "mempool_stats" ][ "tx_count" ] > 0 ) {
