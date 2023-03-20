@@ -98,18 +98,35 @@
             @media screen and (max-width: 600px) {
             }
         </style>
-        <script src="https://unpkg.com/buffer-es@1.0.0/buffer.js"></script>
+
+<script src="https://unpkg.com/buffer-es@1.0.0/buffer.js"></script>
+<script src="/nostr.js"></script>
+
+        <script type="module">import "/bitcoinjs-lib.js"</script>
+        <script type="module">import "/ecpair.js"</script>
 
 
-    <script type="module">import ".//bitcoinjs-lib.js";</script>
-        <script src="https://unpkg.com/@cmdcode/bton@1.0.4"></script>
+<script src="https://unpkg.com/@cmdcode/bton@1.0.4"></script>
         <script> var BTON = window.bton </script>
         <script src="https://unpkg.com/@cmdcode/crypto-utils@1.6.0"></script>
         <script src="https://bundle.run/bech32@2.0.0"></script>
         <script src="https://supertestnet.github.io/bitcoin-chess/js/qrcode.js"></script>
         <script src="secp256k1.js"></script>
         <script>
-          
+         
+            const isProduction = !location.href.includes('signet')
+const ordinalsExplorerUrl = isProduction ? "http://staccstacc.eastus.cloudapp.azure.com" : "https://explorer-signet.openordex.org"
+const baseMempoolUrl = isProduction ? "https://mempool.space" : "https://mempool.space/signet"
+const networkName = isProduction ? "mainnet" : "signet"
+const baseMempoolApiUrl = `${baseMempoolUrl}/api`
+const bitcoinPriceApiUrl = "https://blockchain.info/ticker?cors=true"
+
+            const nostrRelayUrl = 'wss://nostr.openordex.org'
+const collectionsRepo = "ordinals-wallet/ordinals-collections"
+const exchangeName = 'candyMachine'
+const feeLevel = "hourFee" // "fastestFee" || "halfHourFee" || "hourFee" || "economyFee" || "minimumFee"
+const nostrOrderEventKind = 803
+
             var bitcoin = window.bitcoin
             var $ = document.querySelector.bind( document );
             var $$ = document.querySelectorAll.bind( document );
@@ -119,7 +136,7 @@
             for ( var key of url_keys ) $_GET[ key ] = url_params.get( key );
             
 async function getTxHexById(txId) {
-    let baseMempoolApiUrl = "https://mempool.space/testnet/api"
+    let baseMempoolApiUrl = "https://mempool.space/api"
        let txIdid = await fetch(`${baseMempoolApiUrl}/tx/${txId}/hex`)
             .then(response => response.text())
 
@@ -129,23 +146,20 @@ async function getTxHexById(txId) {
         </script>
         <script>
             function hexToUint8Array(hex) {
-  const length = hex.length;
-  const uint8Array = new Uint8Array(length / 2);
-  for (let i = 0; i < length; i += 2) {
-    uint8Array[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  const length = hex.length / 2;
+  const result = new Uint8Array(length);
+  
+  for (let i = 0; i < length; i++) {
+    const byte = parseInt(hex.substr(i * 2, 2), 16);
+    result[i] = byte;
   }
-  return uint8Array;
-}
-function appendSighashType(signature, sighashType) {
-  const extendedSignature = new Uint8Array(signature.length + 1);
-  extendedSignature.set(signature);
-  extendedSignature[signature.length] = sighashType;
-  return extendedSignature;
+
+  return result;
 }
 
 async function getAddressUtxos(address) {
 
-let baseMempoolApiUrl = "https://mempool.space/testnet/api"
+let baseMempoolApiUrl = "https://mempool.space/api"
     return await fetch(`${baseMempoolApiUrl}/address/${address}/utxo`)
         .then(response => response.json())
 }
@@ -211,6 +225,12 @@ async function selectUtxos(utxos, amount, vins, vouts, recommendedFeeRate) {
 
     return [takerUtxos, paddingUtxos]
 }
+function appendSighashType(signature, sighashType) {
+  const extendedSignature = new Uint8Array(signature.length + 1);
+  extendedSignature.set(signature);
+  extendedSignature[signature.length] = sighashType;
+  return extendedSignature;
+}
 
 async function findPaymentUTXO(utxos) {
   
@@ -223,10 +243,25 @@ async function findPaymentUTXO(utxos) {
     fundingAmount: paymentUTXO.value,
   };
 }
+let  from 
 
-            async function generatePSBTListingInscriptionForSale(fundingAddress, ordinalUtxoTxId, ordinalUtxoVout, amt, price, paymentAddress, tapkey, leaf, decodedToAddress, decodedFundingAddress, fee, seckey, script, cblock) {
+function estimateTxSize(inputsCount, outputsCount, feeRate) {
+  const inputSize = 148;
+  const outputSize = 34;
+  const overheadSize = 10;
+
+  const totalSize = overheadSize + (inputsCount * inputSize) + (outputsCount * outputSize);
+  const fee = totalSize * feeRate;
+
+  return fee;
+}
+
+            async function generatePSBTListingInscriptionForSale(KeyPair, fundingAddress, ordinalUtxoTxId, ordinalUtxoVout, amt, price, paymentAddress, tapkey, leaf, decodedToAddress, decodedFundingAddress, fee, seckey, script, cblock) {
                 var bitcoin = window.bitcoin    
-                let psbt = new bitcoin.Psbt({ network: bitcoin.networks.testnet });
+                bitcoin.initEccLib(secp256k1)
+from = await getWalletAddress()
+var scriptPubKeyFrom = bitcoin.address.toOutputScript(from, bitcoin.networks.bitcoin)
+          
                 var redeemtx = {
                   version: 2,
                   input: [{
@@ -238,101 +273,61 @@ async function findPaymentUTXO(utxos) {
                 ],
                   output:[{
                     value: amt - fee,
-                    scriptPubKey: paymentAddress
+                    scriptPubKey: decodedToAddress
                   }],
                   locktime: 0
                 }
                 var sec = await BTON.Tap.getSeckey(seckey.raw, [ leaf ]);
-                var sig = await BTON.Sig.taproot.sign(seckey.raw, redeemtx, 0, { extension: leaf });
+                var sig = await window.StacksProvider.authenticationRequest(rawtx)
+                //code":-26,"message":"bad-witness-nonstandard
+                
                 redeemtx.input[0].witness = [ sig, script, cblock ];
+                appendSighashType(sig, bitcoin.Transaction.SIGHASH_SINGLE | bitcoin.Transaction.SIGHASH_ANYONECANPAY)
                 console.dir(redeemtx, { depth: null });
                 var rawtx = BTON.Tx.encode(redeemtx);
-                var txid = await pushBTCpmt( rawtx ); 
-                sig = appendSighashType(sig, 1);
-
-                console.log('Txdata:', rawtx );
-                console.log(sig)
-                console.log(parseInt(redeemtx.outs))
-                console.log(0)
-                const sellerSignedTx = bitcoin.Transaction.fromHex(await getTxHexById(txid))
-                var encodedScript = BTON.Script.encode(script);
-
-let addy = await getWalletAddress()
-if (window.bitcoin && window.secp256k1) {
-                bitcoin.initEccLib(secp256k1)
-            }
-    for (const output in sellerSignedTx.outs) {
-        try { sellerSignedTx.setWitness(parseInt(output), []) } catch { }
-    }
-
-// add the taproot
-var witnessScriptBuffer = Buffer.from(encodedScript , 'hex');   
-    psbt.addInput({
-        hash: txid,
-        index: parseInt(0),
-        witnessScript : witnessScriptBuffer,
-        sighashType: bitcoin.Transaction.SIGHASH_SINGLE | bitcoin.Transaction.SIGHASH_ANYONECANPAY,
-    });
+                let txid = tran.getId()
+                console.log('redeemtx: ' + txid);
+                let psbt = new bitcoin.Psbt({ network: bitcoin.networks.bitcoin });
 
 
-    psbt.addOutput({
-        address: fundingAddress,
-        value: price,
-    });
-// Finalize the PSBT
 
-                console.log(2)
-
-                
-                const sellerSignedInput = sellerSignedTx.ins[0]
-                signedSalePsbt = bitcoin.Psbt.fromBase64(psbt.toBase64(), { network: bitcoin.networks.testnet })
-
-                if (sellerSignedInput?.script?.length) {
-                    signedSalePsbt.updateInput(0, {
-                        finalScriptSig: sellerSignedInput.script,
-                    })
-                }
-                if (sellerSignedInput?.witness?.[0]?.length) {
-                    signedSalePsbt.updateInput(0, {
-                        finalScriptWitness: witnessStackToScriptWitness(sellerSignedInput.witness),
-                    })
-                }
-
-                signedSalePsbt = signedSalePsbt.toBase64()
-                /* hmm */ 
-                console.log(123)
-                sellerSignedTx.outs.forEach((output, index) => {
-  psbt.addOutput(output);
-});
-                console.log(1233)
-
-var payerAddress = await getWalletAddress()
-console.log(1233)
-        let vins = 2
-        let vouts = 3
-payerUtxos = await getAddressUtxos(payerAddress)
-const [takerUtxos, paddingUtxos] = await selectUtxos(payerUtxos, price, vins, vouts, 3)
-
-var paymentTxid  = takerUtxos[0].txid
-var paymentVout = takerUtxos[0].vout 
-// Payment (taker's input)
-                console.log(1423)
 psbt.addInput({
-  hash: paymentTxid,
-  index: paymentVout,
-  witnessUtxo: {
-    script:  '5120' + tapkey,
-    value: amt,
-  },
-  witnessUtxo: sellerSignedTx.outs[0],
+    hash: txid,
+    index: parseInt(ordinalUtxoVout),
+    witnessUtxo : {
+        script: scriptPubKeyFrom,
+        value: amt
+    },
+    witness : [ sig, script, cblock ],
 });
 
+psbt.addOutput({
+    address: from,
+    value: price,
+});
+// Add the Tapleaf script signature
+// Replace with the actual tapleaf script, control block, and signatures as necessary
+const tapleafScript = Buffer.from(script, 'hex');
+const controlBlock = Buffer.from(cblock, 'hex');
+const signature = Buffer.from(sig, 'hex');
 
+// Since we are using taproot, we need to use the taproot field names
+psbt.updateInput(0, {
+  taprootRedeemScript: tapleafScript,
+  taprootPartialSig: [{ pubkey: controlBlock.slice(1), signature: signature }],
+  taprootControlBlock: controlBlock,
+});
 
-console.log(1243)
+console.log(psbt)
+// sign psbt
+psbt.finalizeAllInputs();   
+console.log(psbt.toBase64())
+// log psbt txid 
 
-                return signedSalePsbt
-            }
+return [psbt.toBase64(),txid, sig]
+
+}
+
 
 
             function encodeBase64( file ) {
@@ -357,6 +352,7 @@ console.log(1243)
               }
               return result.toLowerCase();
             }
+            var price 
             function hexToBytes( hex ) {
                 return Uint8Array.from( hex.match( /.{1,2}/g ).map( ( byte ) => parseInt( byte, 16 ) ) );
             }
@@ -426,6 +422,11 @@ console.log(1243)
         </script>
     </head>
     <body>
+        <h1>candies for sale RIGHT NOW!</h1>
+        <div id="ordersContainer"
+                        class="mt-4 flex-grid col-12 d-flex align-items-start justify-content-center">
+                        <h6 class="text-gray my-5">Loading...</h6>
+                    </div>
         <h1>Welcome to the online inscriber</h1>
         <h2 class="safari_warning">This tool may not work in safari browser. If you are using that, consider switching.</h2>
         <p>First enter a <span class="type_of_address">taproot</span> address from an ordinal wallet</p>
@@ -433,6 +434,8 @@ console.log(1243)
         <p>Then upload a file you want that address to own</p>
         <form>
             <p><input type="file" class="form" multiple="true" /></p>
+            <p>Select a Price for your Candies (measured in sats)</p>
+            <p><input id="price"></p>
             <p>Select a feerate (measured in sats per byte)</p>
             <div class="feerates"><div class="fee minfee"><div class="num">...</div><div class="name">Min</div></div><div class="fee midfee"><div class="num">...</div><div class="name">Mid</div></div><div class="fee maxfee"><div class="num">...</div><div class="name">Max</div></div></div>
             <div id="sliderange">
@@ -456,9 +459,28 @@ console.log(1243)
         <div class="display"></div>
         <div style="display: none;" class="file"></div>
         <script>
-            
+         
+
+async function getInscriptionDataById(inscriptionId, verifyIsInscriptionNumber) {
+    const html = await fetch(ordinalsExplorerUrl + "/inscription/" + inscriptionId)
+        .then(response => response.text())
+
+    const data = [...html.matchAll(/<dt>(.*?)<\/dt>\s*<dd.*?>(.*?)<\/dd>/gm)]
+        .map(x => { x[2] = x[2].replace(/<.*?>/gm, ''); return x })
+        .reduce((a, b) => { return { ...a, [b[1]]: b[2] } }, {});
+
+    const error = `Inscription ${verifyIsInscriptionNumber || inscriptionId} not found (maybe you're on signet and looking for a mainnet inscription or vice versa)`
+    try {
+        data.number = html.match(/<h1>Inscription (\d*)<\/h1>/)[1]
+    } catch { throw new Error(error) }
+    if (verifyIsInscriptionNumber && String(data.number) != String(verifyIsInscriptionNumber)) {
+        throw new Error(error)
+    }
+
+    return data
+}
+   
 async function getWalletAddress() {
-        return (await window.unisat.requestAccounts())[0]
 }
 setTimeout (async function(){
 let gwa = await getWalletAddress()
@@ -469,22 +491,329 @@ console.log(1)
 ////fix error: Cannot read properties of undefined (reading 'script')
 
         
-await unisat.requestAccounts()
-        let ahh = (await unisat.signPsbt(base64ToHex(input)))
+        let ahh = (await window.StacksProvider.transactionRequest(base64ToHex(input)))
+        console.log(input)
+        console.log(ahh)
 console.log(2)
 return ahh
 }
 
+function satsToFormattedDollarString(sats, _bitcoinPrice) {
+    return (satToBtc(sats) * _bitcoinPrice).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    })
+}
+
+function sanitizeHTML(str) {
+    var temp = document.createElement('div');
+    temp.textContent = str;
+    return temp.innerHTML;
+}
+
+async function* getLatestOrders(limit, nostrLimit = 20, filters = {}) {
+console.log(1)
+    if (window.NostrTools) {
+                nostrRelay = window.NostrTools.relayInit(nostrRelayUrl)
+                nostrRelay.connect()
+            }
+    await nostrRelay.connect()
+    const latestOrders = []
+    const inscriptionDataCache = {}
+
+    const orders = await nostrRelay.list([{
+        kinds: [nostrOrderEventKind],
+        limit: nostrLimit,
+        ...filters,
+    }])
+
+    for (const order of orders) {
+        console.log(order)
+        try {
+           
+            const redeem = order.tags.find(x => x?.[0] == 'i')[1]
+            const price = order.tags.find(x => x?.[0] == 's')[1]
+            const wallet = order.tags.find(x => x?.[0] == 'p')[1]
+            const txid = order.tags.find(x => x?.[0] == 'u')[1]
+           let leaf, cblock
+            try {
+             leaf = order.tags.find(x => x?.[0] == 'b')[1]
+             cblock = order.tags.find(x => x?.[0] == 'c')[1]
+        }
+        catch (err){
+            leaf = 0
+            cblock = 0
+        }
+
+            let amt
+            let sig 
+            try { amt = order.tags.find(x => x?.[0] == 'a')[1]
+        }
+        catch (err){
+            sig = 0
+        }
+
+            try { sig = order.tags.find(x => x?.[0] == 'l')[1]
+        }
+        catch (err){
+            amt = 0
+        }
+
+const validatedPrice = parseInt(price || 0)
+            if (!validatedPrice) {
+                continue
+            }
+
+            bitcoinPrice = fetch(bitcoinPriceApiUrl)
+        .then(response => response.json())
+        .then(data => data.USD.last)
+
+            const ord = {
+                title: `Mint for for ${satToBtc(validatedPrice)} BTC ($${satsToFormattedDollarString(validatedPrice, await bitcoinPrice)})`,
+                number: redeem,
+                wallet,
+                psbt: order.content,
+                txid,
+
+                amt, sig,  leaf, cblock
+            }
+            console.log(ord)
+            latestOrders.push(ord)
+            yield ord
+
+            if (latestOrders.length >= limit) {
+                break
+            }
+        } catch (e) {
+            console.error(e)
+        }
+    }
+
+    return latestOrders
+}
+async function loadLatestOrders(limit = 8, nostrLimit = 25) {
+    try {
+        const orders = getLatestOrders(limit, nostrLimit)
+
+        const ordersContainer = document.getElementById('ordersContainer')
+        ordersContainer.innerHTML = ''
+
+        for await (const order of orders) {
+            const orderElement = document.createElement('div')
+            orderElement.onclick = function(){doit( order.psbt, order.amt);}
+            orderElement.innerHTML = `
+                <div class="card card-tertiary w-100 fmxw-300">
+                    <div class="card-header text-center">
+                        <span>Candy by #${order.wallet}</span>
+                    </div>
+                    <div class="card-body" style="padding: 6px 7px 7px 7px">
+                       
+                        <button class="btn btn-block btn-primary mt-2" style="max-width:185px; max-height: revert">${sanitizeHTML(order.title)}</button>
+                    </div>
+                </div>`
+            ordersContainer.appendChild(orderElement)
+        }
+    } catch (e) {
+        console.error(e)
+        console.error(`Error fetching orders:\n` + e.message)
+    }
+}
+setTimeout(async function(){
+
+console.log(await loadLatestOrders())
+})
+async function doit(p, aamnt) {
+
+var bitcoin = window.bitcoin 
+
+            bitcoin.initEccLib(secp256k1)
+    window.Buffer = Buffer;
+    
+let psbts = [p]
+/* add these inputs 
+-inputs-
+0: payment
+1: reveal
+2: fees */
+let inputs = []
+let outputs = []
+let psbt =  bitcoin.Psbt.fromBase64(psbts[0])
+console.log(psbt)
+let amt = 0
+let fee = 0
+
+let walletAddress = await getWalletAddress()
+// for 40000 sats 
+// create payment tx 
+//bitcoin.TransactionBuilder is not a constructor
+// add two dummy utxos 
+var paymenttx = new bitcoin.Transaction()
+console.log(psbt)
+var utxos = await getAddressUtxos   (walletAddress)
+var utxo = utxos[0]
+var utxoTx = await getTxHexById(utxo.txid)
+var utxoTx = bitcoin.Transaction.fromHex(utxoTx)
+var utxoTx = utxoTx.outs[utxo.vout]
+var utxoTx = { hash: utxo.txid, index: utxo.vout, witnessUtxo: utxoTx, value: aamnt + 20000}
+for (const output in utxoTx.outs) {
+    try { tx.setWitness(parseInt(output), []) } catch { }
+}
+
+inputs.push(utxoTx)
+
+let feeRate = 11
+//inputs.push(revealtxinput)
+// add fees input of 20000 sats
+console.log(psbt)
+// add inputs to psbt
+
+// add dummy output
+psbt.addOutput({
+    address: walletAddress,
+    value: 0
+})
+var asktxtx = new bitcoin.Transaction()
+console.log(psbt)
+asktxtx.addOutput(psbt.data.globalMap.unsignedTx.tx.outs[0].script, psbt.data.globalMap.unsignedTx.tx.outs[0].value)
+
+let asktxid = asktxtx.getId()
+let asktxhex = asktxtx.toHex()
+let asktxvout = 0
+let asktxscript = asktxtx.outs[0].script
+let asktxamount = psbt.data.globalMap.unsignedTx.tx.outs[0].value
+for (const output in asktxtx.outs) {
+    try { tx.setWitness(parseInt(output), []) } catch { }
+}
+
+let asktxtxoutput = { hash: asktxid, index: asktxvout,  nonWitnessUtxo: Buffer.from(asktxhex, 'hex') }
+// add dummy output
+
+
+const atx = bitcoin.Transaction.fromHex(await getTxHexById(atxid))
+console.log(atx)
+outputs.push({
+    script: atx.outs[0].script,
+    value: atx.outs[0].value
+})
+
+var totalInputValue = 0
+
+for (let i = 0; i < inputs.length; i++) {
+    if (inputs[i].witnessUtxo) {
+        totalInputValue += inputs[i].witnessUtxo.value
+    } else if (inputs[i].nonWitnessUtxo) {
+        try {
+            totalInputValue += inputs[i].nonWitnessUtxo.outs[inputs[i].index].value
+        } catch (e) {
+            console.log(e)
+        }
+    }
+}
+console.log(inputs)
+console.log(totalInputValue)
+var totalOutputValue = outputs.reduce((sum, output) => sum + output.value, 0);
+console.log(totalOutputValue)
+
+var estimatedFee = estimateTxSize(inputs.length, outputs.length + 1, feeRate);
+console.log(estimatedFee)
+
+var change = (totalInputValue - totalOutputValue - estimatedFee)
+var toutputs = []
+let wallet_address_script = bitcoin.address.toOutputScript(walletAddress, bitcoin.networks.bitcoin)
+if (change > 0) {
+    toutputs.push({
+        script: wallet_address_script,
+        value: change
+    })
+}
+toutputs.push(psbt.data.globalMap.unsignedTx.tx.outs[0])
+toutputs.push(outputs[0])
+
+outputs = toutputs 
+console.log(outputs)
+
+for (let i = 0; i < inputs.length; i++) {
+    console.log(inputs[i])
+    psbt.addInput(inputs[i])
+}
+
+// add outputs to psbt
+for (let i = 0; i < outputs.length; i++) {
+    console.log(outputs[i])
+    psbt.addOutput(outputs[i])
+}   
+
+console.log(psbt)
+// sign psbt
+psbt.finalizeAllInputs();
+
+// Extract the signed transaction from the PSBT
+const signedTransaction = psbt.extractTransaction();
+
+// Get the raw transaction hex to broadcast
+const rawTransactionHex = signedTransaction.toHex();
+}
+var cblock, leaf
+let psbts = []
+for (var psbt of pbsts){
+
+    new Promise(async (resolve, reject) => {
+                try {
+            let apbst = await getTxHexById(psbt)
+             apsbt = bitcoin.Psbt.fromHex(apbst).toBase64()
+            
+            if (window.NostrTools) {
+                nostrRelay = window.NostrTools.relayInit(nostrRelayUrl)
+                nostrRelay.connect()
+            }
+            
+                    await nostrRelay.connect()
+        
+                    let sk = window.NostrTools.generatePrivateKey()
+                    let pk = window.NostrTools.getPublicKey(sk)
+        
+                    let event = {
+                        kind: nostrOrderEventKind,
+                        pubkey: pk,
+                        created_at: Math.floor(Date.now() / 1000),
+                        tags: [
+                    ['n', "mainnet"], // Network name (e.g. "mainnet", "signet")
+                    ['t', 'sell'], // Type of order (e.g. "sell", "buy")
+                    ['s', price.toString()], // Price in sats
+                    ['p', await getWalletAddress()],
+                    ['x', "candyMachine"], // Exchange name (e.g. "openordex")
+                        ],
+                        content: apsbt,
+                    }
+                    console.log(event)
+                    event.id = window.NostrTools.getEventHash(event)
+                    event.sig = window.NostrTools.signEvent(event, sk)
+        
+                    let pub = nostrRelay.publish(event)
+                    pub.on('ok', () => {
+                        console.log(`${nostrRelay.url} has accepted our order`)
+                        resolve()
+                    })
+                    pub.on('failed', reason => {
+                        reject(`Failed to publish PSBT to ${relay.url}: ${reason}`)
+                    })
+                } catch (e) {
+                    reject(e)
+                }
+            })
+}
 async function signPSBTUsingWalletAndBroadcast(input) {
+console.log((input))
 
-    await unisat.requestAccounts()
-        const signedPsbt = await unisat.signPsbt(base64ToHex(input))
+        var signedPsbt = await window.StacksProvider.transactionRequest(base64ToHex(input))
+        var signedPsbt = bitcoin.Psbt.fromBase64(input)
         // finalize input s
-        const psbt = bitcoin.Psbt.fromBase64(input)
-        psbt.finalizeAllInputs()
+        console.log(123)
+        signedPsbt.finalizeAllInputs()
 
-        const txHex = psbt.extractTransaction().toHex()
-let baseMempoolApiUrl = "https://mempool.space/testnet/api"
+        console.log(321)
+        const txHex = signedPsbt.extractTransaction().toHex()
+let baseMempoolApiUrl = "https://mempool.space/api"
         const res = await fetch(`${baseMempoolApiUrl}/tx`, { method: 'post', body: txHex })
         if (res.status != 200) {
             return alert(`Mempool API returned ${res.status} ${res.statusText}\n\n${await res.text()}`)
@@ -493,6 +822,7 @@ let baseMempoolApiUrl = "https://mempool.space/testnet/api"
         const txId = res.text()
         alert('Transaction signed and broadcasted to mempool successfully')
         window.open(`${baseMempoolUrl}/tx/${txId}`, "_blank")
+     
     
 }
             sessionStorage.clear();
@@ -521,14 +851,14 @@ let baseMempoolApiUrl = "https://mempool.space/testnet/api"
                 var data = hexToBytes( hex );
                 var mimetype = ec.encode( sessionStorage[ "mimetype" ] );
                 var script   = [ pubkey, 'OP_CHECKSIG', 'OP_0', 'OP_IF', ec.encode('ord'), '01', mimetype, 'OP_0', data, 'OP_ENDIF' ];
-                var leaf       = await BTON.Tap.getLeaf(BTON.Script.encode(script));
+                 leaf       = await BTON.Tap.getLeaf(BTON.Script.encode(script));
                 leafs.push(leaf)
                 hexs.push(hex)
                 }
                 var [ tapkey ] = await BTON.Tap.getPubkey(pubkey,leafs);
-                var cblock     = await BTON.Tap.getPath(pubkey, leaf);
+                 cblock     = await BTON.Tap.getPath(pubkey, leaf);
                 console.log('Tapkey:', tapkey);
-                var fundingAddress = BTON.Tap.encodeAddress( tapkey, 'tb');
+                var fundingAddress = BTON.Tap.encodeAddress( tapkey, 'bc');
                 console.log('Funding address: ', fundingAddress );
                 //var toAddress = prompt( "give me the address you your inscription to arrive in and consider using this one: tb1padwymyc6x2dfc3cwzvpxxcqsr3c46cjx9zxg0jmcuf44fjuwljxs7x68fm" );
                 //var toAddress = "tb1padwymyc6x2dfc3cwzvpxxcqsr3c46cjx9zxg0jmcuf44fjuwljxs7x68fm";
@@ -590,16 +920,14 @@ let baseMempoolApiUrl = "https://mempool.space/testnet/api"
                 var fee = feerate * txsize;
                 console.log( "feerate:", feerate, "txsize:", txsize, "fee:", fee );
                 console.log( "fee:", fee );
-               
-                var apsbt = await generatePSBTListingInscriptionForSale(fundingAddress, txid, vout, amt, 6660 , decodedFundingAddress, tapkey, leafs[a], decodedToAddress, decodedFundingAddress, fee, seckey, script, cblock);
+                price = parseInt(document.getElementById( "price" ).value)
+console.log(price)
+                var [apsbt, redeemtx, sig] = await generatePSBTListingInscriptionForSale(KeyPair,fundingAddress, txid, vout, amt, price , decodedFundingAddress, tapkey, leafs[a], decodedToAddress, decodedFundingAddress, fee, seckey, script, cblock);
                 console.log(1)
-                console.log('apsbt:', apsbt)
-                var txid = await signPSBTUsingWalletAndBroadcast( apsbt );
-                console.log(3)
-                console.log( "txid:", txid );
                 
+                console.log('apsbt:', apsbt)
                 var html = `<p style="background-color: white; color: black;">Success! Your image will shortly be inscribed on the bitcoin blockchain in this transaction:</p><p style="word-wrap: break-word;"><a href="https://mempool.space/tx/${txid}" target="_blank">https://mempool.space/tx/${txid}</a></p>`;
-                html += `<p style="background-color: white; color: black;">When your transaction confirms you can view it on the ordinals explorer here:</p><p style="word-wrap: break-word;"><a href="https://ordinals.com/inscription/${txid}i0" target="_blank">https://ordinals.com/inscription/${txid}i0</a></p>`;
+                html += `<p style="background-color: white; color: black;">When your transaction confirms you can view it on the ordinals explorer here:</p><p style="word-wrap: break-word;"><a href="http://staccstacc.eastus.cloudapp.azure.com/inscription/${txid}i0" target="_blank">http://staccstacc.eastus.cloudapp.azure.com/inscription/${txid}i0</a></p>`;
                 $( '.modal' ).innerHTML = html;
                 $( '.modal' ).style.display = "block";
                 $( '.black-bg' ).style.display = "block";
@@ -608,7 +936,7 @@ let baseMempoolApiUrl = "https://mempool.space/testnet/api"
             }
             });
             async function getMaxFeeRate() {
-                var fees = await getData( "https://mempool.space/testnet/api/v1/fees/recommended" );
+                var fees = await getData( "https://mempool.space/api/v1/fees/recommended" );
                 fees = JSON.parse( fees );
                 // if ( !( "minimumFee" in fees ) ) return "error -- site down";
                 // var minfee = fees[ "minimumFee" ];
@@ -624,7 +952,7 @@ let baseMempoolApiUrl = "https://mempool.space/testnet/api"
                 return;
             }
             async function getAllFeeRates() {
-                var fees = await getData( "https://mempool.space/testnet/api/v1/fees/recommended" );
+                var fees = await getData( "https://mempool.space/api/v1/fees/recommended" );
                 fees = JSON.parse( fees );
                 return fees;
             }
@@ -657,7 +985,7 @@ let baseMempoolApiUrl = "https://mempool.space/testnet/api"
                 });
             }
             async function  pushBTCpmt( rawtx ) {
-                var txid = await postData( "https://mempool.space/testnet/api/tx", rawtx );
+                var txid = await postData( "https://mempool.space/api/tx", rawtx );
                 return txid;
             }
             function waitSomeSeconds( num ) {
@@ -731,7 +1059,7 @@ let baseMempoolApiUrl = "https://mempool.space/testnet/api"
               var txid;
               var vout;
               var amt;
-              var nonjson = await getData( "https://mempool.space/testnet/api/address/" + address + "/txs" );
+              var nonjson = await getData( "https://mempool.space/api/address/" + address + "/txs" );
               var json = JSON.parse( nonjson );
               var vouts = []
               json.forEach( function( tx ) {
@@ -747,7 +1075,7 @@ let baseMempoolApiUrl = "https://mempool.space/testnet/api"
               return [txid, ...vouts, amt];
             }
             async function addressOnceHadMoney( address ) {
-                var url = "https://mempool.space/testnet/api/address/" + address;
+                var url = "https://mempool.space/api/address/" + address;
                 var nonjson = await getData( url );
                 var json = JSON.parse( nonjson );
                 if ( json[ "chain_stats" ][ "tx_count" ] > 0 || json[ "mempool_stats" ][ "tx_count" ] > 0 ) {
@@ -795,7 +1123,7 @@ let baseMempoolApiUrl = "https://mempool.space/testnet/api"
                     sessionStorage[ "feerate" ] = this.getElementsByClassName( "num" )[ 0 ].innerText;
                     $( '#sats_per_byte' ).innerText = Number( this.getElementsByClassName( "num" )[ 0 ].innerText );
                     $( '#sats_range' ).value = Number( this.getElementsByClassName( "num" )[ 0 ].innerText );
-                }
+               0 }
             });
             function checkAddress() {
                 if ( !isValidTaprootAddress( $( '.address' ).value ) && $( '.address' ).value ) {
