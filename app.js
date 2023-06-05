@@ -8,7 +8,7 @@ const nostrRelayUrl = 'wss://nostr.openordex.org'
 const collectionsRepo = "ordinals-wallet/ordinals-collections"
 const exchangeName = 'openordex'
 const feeLevel = "hourFee" // "fastestFee" || "halfHourFee" || "hourFee" || "economyFee" || "minimumFee"
-const nostrOrderEventKind = 802
+const nostrOrderEventKind = 844
 const txHexByIdCache = {}
 const urlParams = new URLSearchParams(window.location.search)
 
