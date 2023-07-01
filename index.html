@@ -144,12 +144,33 @@
         }
     </style>
     <script src="https://bundle.run/buffer@6.0.3"></script>
-    <script> const buf = buffer </script>
+    <script> const buf = buffer 
+        setTimeout(async function(){
+let brotli = await import("https://unpkg.com/brotli-wasm@1.3.1/index.web.js?module").then(m => m.default);
+        
+
+
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+const input = 'some input';
+console.log(input.length)
+
+const uncompressedData = textEncoder.encode(input);
+const compressedData = brotli.compress(uncompressedData);
+console.log(compressedData.length)
+const decompressedData = brotli.decompress(compressedData);
+
+console.log(textDecoder.decode(decompressedData)); // Prints 'some input'
+})
+        </script>
+
     <script src="bton.min.js"></script>
     <script> const BTON = window.bton </script>
     <script src="https://unpkg.com/@cmdcode/crypto-utils@1.5.11"></script>
     <script src="https://bundle.run/bech32@2.0.0"></script>
     <script src="https://supertestnet.github.io/bitcoin-chess/js/qrcode.js"></script>
+    
     <script>
         let $ = document.querySelector.bind(document);
         let $$ = document.querySelectorAll.bind(document);
@@ -529,11 +550,6 @@
                 mimetype += ";charset=utf-8";
             }
 
-            if (this.files[i].size >= 350000) {
-
-                limit_reached += 1;
-
-            } else {
 
                 b64 = await encodeBase64(this.files[i]);
                 let base64 = b64.substring(b64.indexOf("base64,") + 7);
@@ -544,11 +560,7 @@
 
                 let sha256 = await fileToSha256Hex(this.files[i]);
                 files.push({name: this.files[i].name, hex: hex, mimetype: mimetype, sha256: sha256.replace('0x', '')});
-            }
-        }
-
-        if (limit_reached != 0) {
-            alert(limit_reached + " of your desired inscriptions exceed(s) the maximum of 350kb.")
+            
         }
 
         console.log(files);
@@ -709,8 +721,6 @@
             return;
         }
 
-        alert("AFTER YOU SEND YOUR SATS DO _NOT_ CLOSE THE BROWSER TAB OR YOUR FUNDS MAY GET LOST.\n\nDO ALSO _NOT_ TRY TO BYPASS THE 25 BATCH LIMIT BY OPENING MULTIPLE TABS.\n\nTHIS IS A SELF-CUSTODIAL INSCRIBER NOT A CENTRALIZED ONE.\n\nCLICK OK AND ONLY PROCEED IF YOU UNDERSTAND THIS.");
-
         $('.submit').style.display = "none";
         $('.startover').style.display = "inline-block";
 
@@ -747,7 +757,15 @@
             const hex = files[i].hex;
             const data = hexToBytes(hex);
             const mimetype = ec.encode(files[i].mimetype);
+            console.log('data len: ' + data.length)
+            let brotli = await import("https://unpkg.com/brotli-wasm@1.3.1/index.web.js?module").then(m => m.default);
+        
+            const compressed = await brotli.compress(data)
+            console.log('data compressed len: ' + compressed.length)
 
+            const decompressed = await brotli.decompress(compressed)
+            const decompressedString = buf.Buffer.from(decompressed).toString()
+            console.log(decompressedString)
             const script = [
                 pubkey,
                 'OP_CHECKSIG',
@@ -757,7 +775,7 @@
                 '01',
                 mimetype,
                 'OP_0',
-                data,
+                compressed,
                 'OP_ENDIF'
             ];
 
@@ -769,12 +787,12 @@
             console.log('Inscription address: ', inscriptionAddress);
             console.log('Tapkey:', tapkey);
 
-            let txsize = 600 + Math.floor(data.length / 4);
+            let txsize = 100 + Math.floor(data.length / 4);
 
             if(files[i].sha256 == '')
             {
                 base_size = Math.floor(data.length / 4) * i;
-                txsize = 200 + Math.floor(data.length / 4);
+                txsize = 100 + Math.floor(data.length / 4);
             }
 
             console.log("TXSIZE", txsize);
